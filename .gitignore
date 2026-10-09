@@ -1,0 +1,14 @@
+# Build output and downloaded dependencies (tools/fetch-*.sh)
+build/
+libs/
+out/
+*.class
+*.jar
+*.csv
+logs/
+crash-reports/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
