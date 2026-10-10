@@ -1,0 +1,20 @@
+pluginManagement {
+    repositories {
+        // Development against an SDK that is not released yet: -Pstein.sdkDir=<the sdk repository>, built there
+        // with "./gradlew build publishPlugin" (the plugin comes from its build/maven-repo, see build.gradle).
+        def localSdk = providers.gradleProperty('stein.sdkDir')
+        if (localSdk.present) {
+            maven { url = settingsDir.toPath().resolve(localSdk.get()).resolve('build/maven-repo').toUri() }
+        }
+        // The Stein Gradle plugin (dev.xavier.stein.mod) lives here.
+        maven { url = uri('https://raw.githubusercontent.com/Stein-Project/stein-sdk/maven') }
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    // Downloads JDK 25 for compiling if you do not have it installed.
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'connect'

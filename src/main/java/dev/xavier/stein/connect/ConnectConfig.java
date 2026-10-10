@@ -14,6 +14,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+
+import dev.xavier.stein.loader.api.Log;
+import dev.xavier.stein.loader.api.Secrets;
+import dev.xavier.stein.loader.api.Tasks;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -28,70 +33,67 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import dev.xavier.stein.loader.api.Log;
-import dev.xavier.stein.loader.api.Secrets;
-import dev.xavier.stein.loader.api.Tasks;
 
 /**
- * config/steinconnect.json: os nicks ja usados, o reconectar e o proxy.
+ * {@code config/steinconnect.json}: the offline nicks, reconnect and the proxy.
  *
- * <p>Na primeira vez le as configuracoes dos dois mods que viraram este (config/steinaltmanager.json e
- * config/steinreconnect.json) e grava tudo junto — ninguem perde os nicks nem a espera escolhida. Os arquivos
- * antigos ficam onde estao; so nao sao mais lidos depois disso.
+ * <p>The first time, it reads the settings of the two mods that became this one ({@code
+ * config/steinaltmanager.json} and {@code config/steinreconnect.json}) and writes them together, so
+ * nobody loses their nicks or chosen delay. The old files stay where they are; they are just not
+ * read again.
  *
- * <p><b>As senhas dos proxies nao vao para o JSON</b>: ficam no cofre do mod (config/steinconnect.secrets, protegido
- * pelo Windows), a do proxy de agora em {@link #CURRENT} e a de cada proxy guardado em {@link #SAVED} + o rotulo dele
- * ("usuario@host:porta", unico na lista). Arquivo da versao antiga, com a senha em texto puro, e migrado ao carregar:
- * a senha vai para o cofre e o JSON e regravado sem ela.
+ * <p><b>Proxy passwords never go to the JSON</b>: they live in the mod's vault ({@link
+ * ProxyVault}). A file from an old version, with the password in plain text, is migrated on load:
+ * the password goes to the vault and the JSON is written again without it.
  *
- * <p>O arquivo e salvo um segundo depois da ultima mudanca ({@link #save}), e nao a cada tecla de um campo; e sempre
- * por um temporario trocado de uma vez, para uma queda no meio nao deixar um JSON pela metade.
+ * <p>The file is saved one second after the last change ({@link #save}), not on every keystroke in
+ * a field, and always through a temporary file swapped in at once, so a crash midway does not leave
+ * half a JSON. The JSON keys are what players already have: do not rename them.
+ *
+ * <p>Kept as its own reader (not ModConfig) for the migrations above and the passwords kept out of
+ * the file.
  */
 final class ConnectConfig {
 
-    /** Quantos proxies a lista guarda (os nicks nao tem limite: tem quem use dezenas de contas). */
+    /**
+     * How many proxies the list keeps (nicks have no limit: some people use dozens of accounts).
+     */
     static final int MAX_PROXIES = 6;
-    /** Chave da senha do proxy de agora no cofre. */
-    static final String CURRENT = "proxy.current";
-    /** Prefixo da senha de cada proxy guardado no cofre, seguido do rotulo dele. */
-    static final String SAVED = "proxy.saved.";
 
-    /** Nicks offline guardados, o ultimo acrescentado primeiro; sem limite. */
+    /** Saved offline nicks, the last one added first; no limit. */
     final List<String> recent = new ArrayList<>();
-    /** Reconectar sozinho quando a contagem chega a zero. */
+
+    /** Reconnect on its own when the countdown reaches zero. */
     boolean auto = true;
-    /** Segundos de contagem na tela de desconexao. */
+
+    /** Seconds of countdown on the disconnect screen. */
     int delaySeconds = 10;
 
-    /** Conectar pelo proxy SOCKS5 em vez de direto. */
+    /** Connect through the SOCKS5 proxy instead of directly. */
     boolean proxyOn = false;
+
     String proxyHost = "";
     int proxyPort = 1080;
     String proxyUser = "";
-    /** So na memoria e no cofre; nunca no JSON. */
+
+    /** Only in memory and in the vault; never in the JSON. */
     String proxyPass = "";
-    /** Proxies ja usados (conectou ou passou no teste), do mais recente para o mais antigo: um clique volta a ele. */
+
+    /** Proxies already used (connected or passed the test), newest first: one click goes back. */
     final List<SavedProxy> proxies = new ArrayList<>();
 
-    /** Um proxy da lista: endereco, porta e a conta dele. */
-    static final class SavedProxy {
-        String host = "";
-        int port = 1080;
-        String user = "";
-        /** So na memoria e no cofre; nunca no JSON. */
-        String pass = "";
+    private File file;
+    private ProxyVault vault;
+    private Log log;
 
-        /** Como aparece na lista: "usuario@host:porta" (a senha nunca aparece). */
-        String label() {
-            return (user.isEmpty() ? "" : user + "@") + host + ":" + port;
-        }
-    }
+    /** A save already scheduled for a moment from now. */
+    private volatile boolean pending;
 
-    /** Guarda o proxy de agora no topo da lista (o mesmo endereco e usuario nao se repete). */
+    /**
+     * Puts the current proxy at the top of the list (the same address and user is not repeated).
+     */
     boolean rememberProxy() {
         if (proxyHost.isBlank()) {
             return false;
@@ -102,7 +104,9 @@ final class ConnectConfig {
         p.user = proxyUser;
         p.pass = proxyPass;
         String label = p.label();
-        if (!proxies.isEmpty() && proxies.get(0).label().equals(label) && proxies.get(0).pass.equals(p.pass)) {
+        if (!proxies.isEmpty()
+                && proxies.get(0).label().equals(label)
+                && proxies.get(0).pass.equals(p.pass)) {
             return false;
         }
         proxies.removeIf(s -> s.label().equals(label));
@@ -113,31 +117,24 @@ final class ConnectConfig {
         return true;
     }
 
-    private File file;
-    private Secrets secrets;
-    private Log log;
-    /** O que esta no cofre agora (chave -> senha): so o que mudou e regravado, e o que saiu da lista e apagado. */
-    private final Map<String, String> stored = new HashMap<>();
-    /** Havia senha em texto puro no JSON: foi para o cofre, e o arquivo tem de ser regravado sem ela. */
-    private boolean migrated;
-    /** Um salvamento ja marcado para daqui a pouco. */
-    private volatile boolean pending;
-
-    /** {@code configFile}: config/steinconnect.json (ModContext.configFile); os dos mods antigos ficam ao lado. */
+    /**
+     * Loads {@code configFile} (config/steinconnect.json, from ModContext.configFile); the old
+     * mods' files sit next to it.
+     */
     void load(File configFile, Secrets secrets, Log log) {
-        this.secrets = secrets;
+        this.vault = new ProxyVault(secrets);
         this.log = log;
         file = configFile;
         File dir = configFile.getParentFile();
         if (file.isFile()) {
             read(file, true, true);
-            if (migrated) {
-                log.info("senhas de proxy tiradas do " + file.getName() + " e guardadas no cofre");
+            if (vault.migrated()) {
+                log.info("proxy passwords moved out of " + file.getName() + " into the vault");
                 saveNow();
             }
             return;
         }
-        // Primeira vez: o que era do Alt Manager e do Reconnect.
+        // First time: what belonged to Alt Manager and Reconnect.
         read(new File(dir, "steinaltmanager.json"), true, false);
         read(new File(dir, "steinreconnect.json"), false, true);
         saveNow();
@@ -149,13 +146,8 @@ final class ConnectConfig {
         }
         try (Reader r = new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8)) {
             JsonObject o = new JsonParser().parse(r).getAsJsonObject();
-            if (nicks && o.has("recent") && o.get("recent").isJsonArray()) {
-                for (JsonElement e : o.getAsJsonArray("recent")) {
-                    String nick = e.getAsString();
-                    if (Accounts.valid(nick) && recent.stream().noneMatch(nick::equalsIgnoreCase)) {
-                        recent.add(nick);
-                    }
-                }
+            if (nicks) {
+                readNicks(o);
             }
             if (reconnect) {
                 if (o.has("auto")) {
@@ -165,53 +157,55 @@ final class ConnectConfig {
                     delaySeconds = Math.max(1, Math.min(60, o.get("delaySeconds").getAsInt()));
                 }
             }
-            if (o.has("proxyOn")) {
-                proxyOn = o.get("proxyOn").getAsBoolean();
-            }
-            proxyHost = string(o, "proxyHost", proxyHost);
-            proxyUser = string(o, "proxyUser", proxyUser);
-            proxyPass = password(CURRENT, string(o, "proxyPass", ""));
-            if (o.has("proxyPort")) {
-                proxyPort = Math.max(1, Math.min(65535, o.get("proxyPort").getAsInt()));
-            }
-            if (o.has("proxies") && o.get("proxies").isJsonArray()) {
-                for (JsonElement e : o.getAsJsonArray("proxies")) {
-                    if (!e.isJsonObject() || proxies.size() >= MAX_PROXIES) {
-                        continue;
-                    }
-                    JsonObject j = e.getAsJsonObject();
-                    SavedProxy p = new SavedProxy();
-                    p.host = string(j, "host", "").trim();
-                    p.port = j.has("port") ? Math.max(1, Math.min(65535, j.get("port").getAsInt())) : 1080;
-                    p.user = string(j, "user", "");
-                    if (!p.host.isEmpty()) {
-                        p.pass = password(SAVED + p.label(), string(j, "pass", ""));
-                        proxies.add(p);
-                    }
-                }
-            }
+            readProxy(o);
         } catch (IOException | RuntimeException e) {
-            log.warn(f + " ilegivel, seguindo com o padrao: " + e);
+            log.warn(f + " unreadable, going on with the defaults: " + e);
         }
     }
 
-    /**
-     * A senha de uma chave: a que ainda esta em texto puro no JSON (versao antiga) vai para o cofre; sem ela, a do
-     * cofre. Cofre que nao abre (arquivo copiado de outra conta ou maquina) da senha vazia: o jogador digita de novo.
-     */
-    private String password(String key, String plain) {
-        if (!plain.isEmpty()) {
-            secrets.put(key, plain);
-            stored.put(key, plain);
-            migrated = true;
-            return plain;
+    private void readNicks(JsonObject o) {
+        if (!o.has("recent") || !o.get("recent").isJsonArray()) {
+            return;
         }
-        String s = secrets.get(key);
-        if (s == null || s.isEmpty()) {
-            return "";
+        for (JsonElement e : o.getAsJsonArray("recent")) {
+            String nick = e.getAsString();
+            if (Accounts.valid(nick) && recent.stream().noneMatch(nick::equalsIgnoreCase)) {
+                recent.add(nick);
+            }
         }
-        stored.put(key, s);
-        return s;
+    }
+
+    private void readProxy(JsonObject o) {
+        if (o.has("proxyOn")) {
+            proxyOn = o.get("proxyOn").getAsBoolean();
+        }
+        proxyHost = string(o, "proxyHost", proxyHost);
+        proxyUser = string(o, "proxyUser", proxyUser);
+        proxyPass = vault.password(ProxyVault.CURRENT, string(o, "proxyPass", ""));
+        if (o.has("proxyPort")) {
+            proxyPort = port(o.get("proxyPort").getAsInt());
+        }
+        if (!o.has("proxies") || !o.get("proxies").isJsonArray()) {
+            return;
+        }
+        for (JsonElement e : o.getAsJsonArray("proxies")) {
+            if (!e.isJsonObject() || proxies.size() >= MAX_PROXIES) {
+                continue;
+            }
+            JsonObject j = e.getAsJsonObject();
+            SavedProxy p = new SavedProxy();
+            p.host = string(j, "host", "").trim();
+            p.port = j.has("port") ? port(j.get("port").getAsInt()) : 1080;
+            p.user = string(j, "user", "");
+            if (!p.host.isEmpty()) {
+                p.pass = vault.password(ProxyVault.SAVED + p.label(), string(j, "pass", ""));
+                proxies.add(p);
+            }
+        }
+    }
+
+    private static int port(int value) {
+        return Math.max(1, Math.min(65535, value));
     }
 
     private static String string(JsonObject o, String key, String fallback) {
@@ -219,22 +213,24 @@ final class ConnectConfig {
     }
 
     /**
-     * Salva daqui a um segundo, juntando as mudancas desse meio tempo (cada tecla de um campo) num salvamento so. Na
-     * thread do jogo, como todo mundo que mexe na configuracao.
+     * Saves one second from now, merging the changes in the meantime (each keystroke in a field)
+     * into a single save. On the game thread, like everything that changes the settings.
      */
     void save() {
         if (file == null || pending) {
             return;
         }
         pending = true;
-        Tasks.later(20, () -> {
-            if (pending) {
-                saveNow();
-            }
-        });
+        Tasks.later(
+                20,
+                () -> {
+                    if (pending) {
+                        saveNow();
+                    }
+                });
     }
 
-    /** Salva o que ainda esperava o segundo: o jogo fechando nao pode perder a ultima tecla. */
+    /** Saves what was still waiting for its second: closing the game must not lose the last key. */
     void flush() {
         if (pending) {
             saveNow();
@@ -246,7 +242,44 @@ final class ConnectConfig {
         if (file == null) {
             return;
         }
-        saveSecrets();
+        vault.sync(passwords());
+        file.getParentFile().mkdirs();
+        File tmp = new File(file.getPath() + ".tmp");
+        try {
+            try (Writer w =
+                    new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
+                w.write(new GsonBuilder().setPrettyPrinting().create().toJson(toJson()));
+            }
+            try {
+                Files.move(
+                        tmp.toPath(),
+                        file.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            log.warn("could not save " + file + ": " + e);
+        }
+    }
+
+    /** The passwords as the vault must hold them now (key -> password). */
+    private Map<String, String> passwords() {
+        Map<String, String> now = new HashMap<>();
+        if (!proxyPass.isEmpty()) {
+            now.put(ProxyVault.CURRENT, proxyPass);
+        }
+        for (SavedProxy p : proxies) {
+            if (!p.pass.isEmpty()) {
+                now.put(ProxyVault.SAVED + p.label(), p.pass);
+            }
+        }
+        return now;
+    }
+
+    /** Everything but the passwords. */
+    private JsonObject toJson() {
         JsonArray list = new JsonArray();
         for (String n : recent) {
             list.add(new JsonPrimitive(n));
@@ -268,48 +301,6 @@ final class ConnectConfig {
             saved.add(j);
         }
         o.add("proxies", saved);
-        file.getParentFile().mkdirs();
-        File tmp = new File(file.getPath() + ".tmp");
-        try {
-            try (Writer w = new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
-                w.write(new GsonBuilder().setPrettyPrinting().create().toJson(o));
-            }
-            try {
-                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
-        } catch (IOException e) {
-            log.warn("nao salvou " + file + ": " + e);
-        }
-    }
-
-    /** O cofre igual as senhas de agora: grava so a que mudou e apaga a de proxy que saiu da lista. */
-    private void saveSecrets() {
-        if (secrets == null) {
-            return;
-        }
-        Map<String, String> now = new HashMap<>();
-        if (!proxyPass.isEmpty()) {
-            now.put(CURRENT, proxyPass);
-        }
-        for (SavedProxy p : proxies) {
-            if (!p.pass.isEmpty()) {
-                now.put(SAVED + p.label(), p.pass);
-            }
-        }
-        for (Map.Entry<String, String> e : now.entrySet()) {
-            if (!e.getValue().equals(stored.get(e.getKey()))) {
-                secrets.put(e.getKey(), e.getValue());
-            }
-        }
-        Set<String> gone = new HashSet<>(stored.keySet());
-        gone.removeAll(now.keySet());
-        for (String k : gone) {
-            secrets.remove(k);
-        }
-        stored.clear();
-        stored.putAll(now);
+        return o;
     }
 }

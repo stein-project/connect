@@ -8,37 +8,41 @@
 
 package dev.xavier.stein.connect;
 
-import java.util.List;
 import dev.xavier.stein.loader.api.Lang;
 import dev.xavier.stein.loader.api.Log;
 import dev.xavier.stein.loader.api.Screens;
 import dev.xavier.stein.loader.api.Server;
 
+import java.util.List;
+
 /**
- * Voltar ao servidor depois de uma queda. Veio do Stein Reconnect.
+ * Back to the server after a drop. Came from Stein Reconnect.
  *
- * <p>Na tela de desconexao (queda, kick, servidor cheio), um botao "Reconectar (10s)" com contagem regressiva: ao
- * chegar a zero reconecta sozinho (se a opcao estiver ligada), e o clique reconecta na hora. O servidor e o ultimo
- * em que o jogador entrou — guardado ao conectar, entao vale tambem para kick ainda no login.
+ * <p>On the disconnect screen (drop, kick, server full), a "Reconnect (10s)" button with a
+ * countdown: at zero it reconnects on its own (if the option is on), and a click reconnects at
+ * once. The server is the last one the player joined, remembered on connecting, so it also works
+ * for a kick still during login.
  *
- * <p>O Server.lastAddress() do Loader so muda ao entrar de fato no mundo; na tela de conexao vale o
- * {@link Server#connectingAddress}, que ja e o servidor tentado. Quem entra no servidor e o Loader
- * ({@link Server#connect}).
+ * <p>The Loader's Server.lastAddress() only changes once actually in the world; on the connecting
+ * screen {@link Server#connectingAddress} already is the server being tried. Joining is the
+ * Loader's job ({@link Server#connect}).
  */
 final class Reconnect {
 
-    /** Id longe dos do jogo (a tela de desconexao so tem o 0). */
+    /** An id far from the game's (the disconnect screen only has 0). */
     static final int BUTTON = 0x5E100;
 
     private final ConnectConfig config;
     private final Log log;
 
-    /** Ultimo servidor em que o jogador entrou (ou tentou entrar). */
+    /** The last server the player joined (or tried to). */
     private String lastIp;
+
     private int attempts;
 
-    /** Tela de desconexao atual, o botao dela e o fim da contagem (0 = sem contagem). */
+    /** The current disconnect screen, its button and the end of the countdown (0 = none). */
     private Object screen;
+
     private Object button;
     private long deadline;
 
@@ -48,7 +52,8 @@ final class Reconnect {
     }
 
     void joined() {
-        // O endereco da conexao, que vale tambem quando o jogo entrou pela linha de comando (sem ServerData).
+        // The connection's address, which also works when the game joined from the command line
+        // (without ServerData).
         String a = Server.address();
         if (!a.isEmpty()) {
             lastIp = a;
@@ -56,7 +61,7 @@ final class Reconnect {
         attempts = 0;
     }
 
-    /** Devolve true quando pos o botao na tela. */
+    /** Returns true when it put the button on the screen. */
     boolean guiInit(Object s, List<Object> buttons) {
         Screens.Kind kind = Screens.kind(s);
         if (kind == Screens.Kind.CONNECTING) {
@@ -67,12 +72,12 @@ final class Reconnect {
             return false;
         }
         Object back = Screens.findButton(buttons, 0);
-        // Logo abaixo do "Voltar a lista de servidores" do jogo, da mesma largura.
+        // Right below the game's "Back to server list", with the same width.
         int x = back != null ? Screens.buttonX(back) : Screens.width(s) / 2 - 100;
         int y = (back != null ? Screens.buttonY(back) : Screens.height(s) / 2) + 24;
         button = Screens.button(BUTTON, x, y, 200, 20, "");
         buttons.add(button);
-        if (s != screen) { // tela nova, nao so a janela mudando de tamanho
+        if (s != screen) { // a new screen, not just the window being resized
             screen = s;
             deadline = config.auto ? now() + config.delaySeconds * 1000L : 0L;
         }
@@ -92,7 +97,7 @@ final class Reconnect {
         if (screen == null) {
             return;
         }
-        if (Screens.current() != screen) { // saiu da tela de desconexao
+        if (Screens.current() != screen) { // left the disconnect screen
             screen = null;
             button = null;
             deadline = 0L;
@@ -117,7 +122,7 @@ final class Reconnect {
         }
     }
 
-    /** Na tela de conexao, antes de entrar: o servidor que ela esta tentando. */
+    /** On the connecting screen, before joining: the server it is trying. */
     private void remember() {
         String a = Server.connectingAddress();
         if (!a.isEmpty()) {
@@ -130,7 +135,7 @@ final class Reconnect {
         screen = null;
         button = null;
         deadline = 0L;
-        log.info("reconectando em " + lastIp + " (tentativa " + attempts + ")");
+        log.info("reconnecting to " + lastIp + " (attempt " + attempts + ")");
         Server.connect(lastIp);
     }
 

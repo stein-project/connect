@@ -8,17 +8,18 @@
 
 package dev.xavier.stein.connect;
 
-import dev.xavier.stein.loader.api.Lang;
 import dev.xavier.stein.loader.api.Account;
+import dev.xavier.stein.loader.api.Lang;
 import dev.xavier.stein.loader.api.Log;
 
 /**
- * A conta com que o jogo entra no servidor. Veio do Stein Alt Manager.
+ * The account the game joins servers with. Came from Stein Alt Manager.
  *
- * <p>Nick offline e uma sessao sem conta (o UUID offline do nick, sem token): so entra em servidor sem
- * autenticacao — num servidor com autenticacao o proprio jogo recusa. Voltar restaura a sessao que o launcher
- * entregou; o jogo sempre abre nela. A troca, a sessao do launcher e a conferencia com a Microsoft sao do Loader
- * ({@link Account}): o mod nao ve o token.
+ * <p>An offline nick is a session without an account (the nick's offline UUID, no token): it only
+ * joins servers without authentication, and on one with authentication the game itself refuses.
+ * Going back restores the session the launcher handed over; the game always starts in it. The
+ * switch, the launcher's session and the check with Microsoft belong to the Loader ({@link
+ * Account}): this mod never sees a token.
  */
 final class Accounts {
 
@@ -30,7 +31,7 @@ final class Accounts {
         this.log = log;
     }
 
-    /** O nick da sessao de agora. */
+    /** The current session's nick. */
     String name() {
         return Account.name();
     }
@@ -44,11 +45,12 @@ final class Accounts {
     }
 
     /**
-     * O tipo da conta do launcher, para mostrar. <b>So diz Microsoft depois de conferir</b>: ter um token nao basta
-     * (launcher sem conta manda um qualquer). Enquanto a resposta nao chega, "verificando".
+     * The kind of the launcher's account, for display. <b>It only says Microsoft after
+     * checking</b>: having a token is not enough (a launcher without an account sends any). Until
+     * the answer comes, "verifying".
      */
     String launcherKind() {
-        // A do launcher, mesmo com um nick em uso: o Loader confere e guarda as duas.
+        // The launcher's, even with a nick in use: the Loader checks and keeps both.
         Account.Kind k = Account.launcherKind();
         if (k == Account.Kind.OFFLINE) {
             return Lang.tr("steinconnect.offline");
@@ -65,15 +67,18 @@ final class Accounts {
         return "§7" + Lang.tr("steinconnect.checking");
     }
 
-    /** 3 a 16 letras, numeros ou _: mais estrito que o Players.isValidNick (1 a 16), como sempre foi aqui. */
+    /**
+     * 3 to 16 letters, digits or _: stricter than Players.isValidNick (1 to 16), as it always was
+     * here.
+     */
     static boolean valid(String nick) {
         return nick != null && nick.matches("[A-Za-z0-9_]{3,16}");
     }
 
     /**
-     * Entra como o nick (sessao offline) e guarda na lista. A lista nao tem limite, e uma conta que ja esta nela fica
-     * no lugar: com dezenas de contas, a que acabou de ser usada pular para o topo baguncava a lista a cada clique.
-     * So a nova entra no topo.
+     * Plays as the nick (offline session) and keeps it on the list. The list has no limit, and an
+     * account already on it stays in place: with dozens of accounts, the one just used jumping to
+     * the top reshuffled the list on every click. Only a new one goes to the top.
      */
     void useNick(String nick) {
         Account.useOffline(nick);
@@ -81,11 +86,11 @@ final class Accounts {
             config.recent.add(0, nick);
         }
         config.save();
-        log.info("nick offline: " + nick);
+        log.info("offline nick: " + nick);
     }
 
     void restore() {
         Account.restoreLauncher();
-        log.info("de volta a conta do launcher: " + Account.launcherName());
+        log.info("back to the launcher account: " + Account.launcherName());
     }
 }

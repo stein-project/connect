@@ -1,0 +1,162 @@
+# The release of the mod: the .steinmod on a GitHub release, and the mod's entry in the mods index that the installer
+# and the Stein Client read (the "mods" of Stein-Project/stein-loader/stein.json).
+#
+#   git tag v0.1.8 && git push origin v0.1.8            stable: the tag must be v<"version" of steinmod.json>
+#   git tag v0.1.8-rc.1 && git push origin v0.1.8-rc.1  test version: a pre-release and the "test.mods" block of
+#                                                       stein.json, which only the Stein Client's test channel reads;
+#                                                       no Discord
+#
+# Run by hand (Actions > release > Run workflow) it is a dry run (ensaio): it builds, checks the changelog, keeps the
+# .steinmod as a workflow artifact and prints the release notes, the index entry and the Discord messages it would
+# send, publishing nothing.
+#
+# On a tag:
+#   1. the changelog is required before anything is built: changelog/<version>.en_US.md and .pt_BR.md (en_US goes on
+#      the release, pt_BR on Discord);
+#   2. release v<version> on RELEASE_REPO with <Name>.steinmod and SHA256SUMS.txt (the plain build: mods are not
+#      obfuscated);
+#   3. the mod's entry in the "mods" index (or "test.mods") of <DIST_OWNER>/stein-loader/stein.json: id, modId, name,
+#      file, version, url, sha256, loader, description. The rest of the file is kept as it is;
+#   4. Discord (stable only): the notes in #changelog and the single downloads message rewritten. Optional: without
+#      the DISCORD_BOT_TOKEN secret or the channel variables it is skipped.
+# Every step is idempotent: running the same tag again publishes nothing twice.
+#
+# Settings of this repository:
+#   secrets    DIST_TOKEN          fine-grained PAT with Contents: read and write on Stein-Project/stein-loader
+#              DISCORD_BOT_TOKEN   optional
+#   variables  DIST_OWNER          optional, default Stein-Project
+#              DISCORD_CANAL_DOWNLOADS, DISCORD_CANAL_CHANGELOG   optional
+#
+# Like build.yml, it needs the Stein SDK version of build.gradle released on Stein-Project/stein-sdk (0.2.3).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # The release of this repository, with the workflow's own token.
+      contents: write
+    env:
+      # --- what changes from mod to mod ---
+      INDEX_ID: connect
+      INDEX_DESCRIPTION: Contas, reconexão automática e proxy SOCKS5.
+      # An open mod is released in its own repository.
+      RELEASE_REPO: ${{ github.repository }}
+      # ---
+      DIST_OWNER: ${{ vars.DIST_OWNER || 'Stein-Project' }}
+      ENSAIO: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # First on purpose: a release without its notes stops in seconds, not after the build.
+      - name: Version and changelog
+        id: version
+        run: |
+          if [ -z "$RELEASE_REPO" ]; then
+            msg="no release repository: set the RELEASE_REPO variable of this repository (Settings > Secrets and variables > Actions)"
+            [ "$ENSAIO" = true ] || { echo "::error::$msg"; exit 1; }
+            echo "::warning::$msg"; echo "RELEASE_REPO=OWNER/REPO-NOT-SET" >> "$GITHUB_ENV"
+          fi
+          v="$(bash .github/scripts/mod.sh version)"
+          teste=
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            case "$GITHUB_REF_NAME" in
+              "v$v") ;;
+              "v$v"-*) teste="${GITHUB_REF_NAME#"v$v"-}" ;;
+              *) echo "::error::tag $GITHUB_REF_NAME does not match the steinmod.json version $v (v$v or v$v-<label>)"; exit 1 ;;
+            esac
+            [[ -z "$teste" || "$teste" =~ ^[A-Za-z0-9.]+$ ]] || { echo "::error::invalid test label: $teste"; exit 1; }
+          fi
+          bash .github/scripts/changelog.sh check changelog "$v"
+          {
+            echo "version=$v"
+            echo "tag=v$v${teste:+-$teste}"
+            echo "teste=$teste"
+          } >> "$GITHUB_OUTPUT"
+          echo "$INDEX_ID $v${teste:+ (test: $teste)} -> $RELEASE_REPO"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and check
+        run: ./gradlew build
+
+      - name: Files and notes
+        run: |
+          bash .github/scripts/mod.sh files
+          ls -la dist
+          echo "::group::release notes"; cat notes.md; echo "::endgroup::"
+
+      - name: Keep the files (dry run)
+        if: env.ENSAIO == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.INDEX_ID }}-${{ steps.version.outputs.version }}
+          path: |
+            dist/
+            notes.md
+          retention-days: 14
+
+      - name: What it would publish (dry run)
+        if: env.ENSAIO == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "release $TAG -> $RELEASE_REPO:"; ls dist
+          echo "index entry in $DIST_OWNER/stein-loader/stein.json:"
+          bash .github/scripts/mod.sh entry
+          export PRINT=1 ROTULO="$(jq -r .name src/main/resources/steinmod.json)" VERSAO="$VERSION" \
+                 NOTAS="changelog/$VERSION.pt_BR.md" URL="https://github.com/$RELEASE_REPO/releases/tag/$TAG"
+          bash .github/scripts/discord.sh changelog
+          bash .github/scripts/discord.sh downloads || true
+          echo "(dry run: nothing was published)"
+
+      - name: Release (${{ env.RELEASE_REPO }})
+        if: env.ENSAIO != 'true'
+        env:
+          # The workflow token for a release in this repository; RELEASE_TOKEN (a PAT) when RELEASE_REPO is another one.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TESTE: ${{ steps.version.outputs.teste }}
+        run: bash .github/scripts/mod.sh release
+
+      - name: Mods index (${{ env.DIST_OWNER }}/stein-loader)
+        if: env.ENSAIO != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DIST_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TESTE: ${{ steps.version.outputs.teste }}
+        run: bash .github/scripts/mod.sh index
+
+      - name: Discord
+        if: env.ENSAIO != 'true' && steps.version.outputs.teste == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CANAL_DOWNLOADS: ${{ vars.DISCORD_CANAL_DOWNLOADS }}
+          DISCORD_CANAL_CHANGELOG: ${{ vars.DISCORD_CANAL_CHANGELOG }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          export ROTULO="$(jq -r .name src/main/resources/steinmod.json)" VERSAO="$VERSION" \
+                 NOTAS="changelog/$VERSION.pt_BR.md" URL="https://github.com/$RELEASE_REPO/releases/tag/$TAG"
+          bash .github/scripts/discord.sh changelog
+          # One message about every component, rewritten after everything is published.
+          bash .github/scripts/discord.sh downloads

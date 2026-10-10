@@ -1,7 +1,11 @@
-# Shell scripts must keep LF: with CRLF they do not run on Linux or macOS.
-# LF in every checkout, Windows too: the formatter and .editorconfig expect it, and scripts need it.
+# LF in every checkout, Windows too: the formatter and .editorconfig expect it, and shell scripts with CRLF do not run
+# on Linux or macOS.
 * text=auto eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
+/gradlew text eol=lf
+
+# Binaries: never converted, never diffed as text.
 *.jar binary
 *.png binary
+*.steinmod binary

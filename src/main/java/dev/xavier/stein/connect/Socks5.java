@@ -8,30 +8,35 @@
 
 package dev.xavier.stein.connect;
 
+import dev.xavier.stein.loader.api.Lang;
+import dev.xavier.stein.loader.api.Log;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import dev.xavier.stein.loader.api.Lang;
 
 /**
- * O tunel SOCKS5, escrito aqui (o Netty do 1.8.9 e de 2014 e nao tem o handler de proxy; trocar a biblioteca inteira
- * sairia mais caro — ver a secao "Netty" do README).
+ * The SOCKS5 tunnel, written here: the Netty of 1.8.9 is from 2014 and has no proxy handler, and
+ * replacing the whole library would cost more.
  *
- * <p>Fica na frente dos handlers do jogo: conversa com o proxy nos bytes crus e, so quando o tunel esta de pe, sai da
- * fila e deixa o jogo falar. Enquanto isso <b>segura o que o jogo escreve</b>: ele manda o handshake assim que o
- * connect volta, e nesse instante o tunel ainda esta sendo negociado. O {@code channelActive} passa na hora, porque
- * e nele que o NetworkManager do jogo guarda o canal — segurando-o, o jogo nem conseguia mostrar o motivo de uma
- * recusa do proxy e ficava parado em "entrando".
+ * <p>It sits in front of the game's handlers: it talks to the proxy in raw bytes and, only once the
+ * tunnel is up, leaves the pipeline and lets the game talk. Meanwhile it <b>holds what the game
+ * writes</b>: the game sends its handshake as soon as connect returns, while the tunnel is still
+ * being negotiated. {@code channelActive} goes through at once, because that is where the game's
+ * NetworkManager keeps the channel; held back, the game could not even show why the proxy refused
+ * and stayed on "connecting".
  *
- * <p>Sequencia (RFC 1928 e 1929): saudacao com os metodos aceitos, autenticacao de usuario e senha se o proxy pedir,
- * e o pedido de CONNECT para o endereco do servidor. Erro em qualquer passo vira excecao no canal, entao o jogo
- * mostra o motivo na tela de desconexao em vez de esperar o tempo esgotar.
+ * <p>Sequence (RFC 1928 and 1929): greeting with the accepted methods, username and password
+ * authentication if the proxy asks, and the CONNECT request to the server's address. An error at
+ * any step becomes an exception on the channel, so the game shows the reason on the disconnect
+ * screen instead of waiting for a timeout.
  */
 final class Socks5 extends ChannelDuplexHandler {
 
@@ -43,21 +48,26 @@ final class Socks5 extends ChannelDuplexHandler {
     private static final byte DOMAIN = 3;
     private static final byte IPV6 = 4;
 
-    /** Passo: 0 saudacao enviada, 1 autenticacao enviada, 2 CONNECT enviado, 3 tunel de pe. */
+    /** Step: 0 greeting sent, 1 authentication sent, 2 CONNECT sent, 3 tunnel up. */
     private int step;
+
     private final InetAddress host;
     private final int port;
     private final String user;
     private final String pass;
-    /** O que o jogo escreveu antes de o tunel ficar pronto. */
+    private final Log log;
+
+    /** What the game wrote before the tunnel was ready. */
     private final List<Object[]> held = new ArrayList<>();
+
     private ByteBuf inbox;
 
-    Socks5(InetAddress host, int port, String user, String pass) {
+    Socks5(InetAddress host, int port, String user, String pass, Log log) {
         this.host = host;
         this.port = port;
         this.user = user == null ? "" : user;
         this.pass = pass == null ? "" : pass;
+        this.log = log;
     }
 
     @Override
@@ -70,8 +80,9 @@ final class Socks5 extends ChannelDuplexHandler {
             b.writeByte(2).writeByte(NO_AUTH).writeByte(USER_PASS);
         }
         ctx.writeAndFlush(b);
-        // O jogo precisa saber do canal desde ja: e no channelActive que o NetworkManager dele guarda o canal, e sem
-        // isso ele nao consegue nem fechar com motivo se o proxy recusar. O que ele escrever fica seguro aqui.
+        // The game must know about the channel right away: its NetworkManager keeps the channel in
+        // channelActive, and without it, it cannot even close with a reason if the proxy refuses.
+        // Whatever it writes is held here.
         ctx.fireChannelActive();
     }
 
@@ -87,10 +98,10 @@ final class Socks5 extends ChannelDuplexHandler {
         inbox.writeBytes(in);
         in.release();
         while (step < 3 && advance(ctx)) {
-            // cada passo consome o que chegou dele
+            // each step consumes what arrived for it
         }
         if (step == 3 && inbox != null) {
-            // O que veio junto com a resposta do proxy ja e do servidor.
+            // Whatever came along with the proxy's answer already belongs to the server.
             ByteBuf rest = inbox;
             inbox = null;
             if (rest.isReadable()) {
@@ -101,64 +112,80 @@ final class Socks5 extends ChannelDuplexHandler {
         }
     }
 
-    /** Le um passo da conversa; devolve false quando ainda falta byte. */
+    /** Reads one step of the conversation; false while bytes are still missing. */
     private boolean advance(ChannelHandlerContext ctx) throws Exception {
-        switch (step) {
-            case 0 -> {
-                if (inbox.readableBytes() < 2) {
-                    return false;
-                }
-                byte version = inbox.readByte();
-                byte method = inbox.readByte();
-                if (version != VERSION) {
-                    return fail(ctx, "steinconnect.proxy.notSocks");
-                }
-                if (method == NO_AUTH) {
-                    request(ctx);
-                } else if (method == USER_PASS && !user.isEmpty()) {
-                    auth(ctx);
-                } else {
-                    return fail(ctx, method == (byte) 0xFF ? "steinconnect.proxy.noMethod"
-                            : "steinconnect.proxy.needsAuth");
-                }
-                return true;
-            }
-            case 1 -> {
-                if (inbox.readableBytes() < 2) {
-                    return false;
-                }
-                inbox.readByte(); // versao da autenticacao
-                if (inbox.readByte() != 0) {
-                    return fail(ctx, "steinconnect.proxy.badAuth");
-                }
-                request(ctx);
-                return true;
-            }
-            default -> {
-                if (inbox.readableBytes() < 5) {
-                    return false;
-                }
-                int mark = inbox.readerIndex();
-                inbox.readByte(); // versao
-                byte reply = inbox.readByte();
-                inbox.readByte(); // reservado
-                byte type = inbox.readByte();
-                int rest = type == IPV4 ? 4 : type == IPV6 ? 16 : type == DOMAIN ? 1 + inbox.getUnsignedByte(inbox.readerIndex()) : -1;
-                if (rest < 0) {
-                    return fail(ctx, "steinconnect.proxy.badReply");
-                }
-                if (inbox.readableBytes() < rest + 2) {
-                    inbox.readerIndex(mark);
-                    return false;
-                }
-                inbox.skipBytes(rest + 2);
-                if (reply != 0) {
-                    return fail(ctx, reason(reply));
-                }
-                done(ctx);
-                return true;
-            }
+        return switch (step) {
+            case 0 -> greeted(ctx);
+            case 1 -> authenticated(ctx);
+            default -> connected(ctx);
+        };
+    }
+
+    private boolean greeted(ChannelHandlerContext ctx) {
+        if (inbox.readableBytes() < 2) {
+            return false;
         }
+        byte version = inbox.readByte();
+        byte method = inbox.readByte();
+        if (version != VERSION) {
+            return fail(ctx, "steinconnect.proxy.notSocks");
+        }
+        if (method == NO_AUTH) {
+            request(ctx);
+        } else if (method == USER_PASS && !user.isEmpty()) {
+            auth(ctx);
+        } else {
+            return fail(
+                    ctx,
+                    method == (byte) 0xFF
+                            ? "steinconnect.proxy.noMethod"
+                            : "steinconnect.proxy.needsAuth");
+        }
+        return true;
+    }
+
+    private boolean authenticated(ChannelHandlerContext ctx) {
+        if (inbox.readableBytes() < 2) {
+            return false;
+        }
+        inbox.readByte(); // authentication version
+        if (inbox.readByte() != 0) {
+            return fail(ctx, "steinconnect.proxy.badAuth");
+        }
+        request(ctx);
+        return true;
+    }
+
+    private boolean connected(ChannelHandlerContext ctx) throws Exception {
+        if (inbox.readableBytes() < 5) {
+            return false;
+        }
+        int mark = inbox.readerIndex();
+        inbox.readByte(); // version
+        byte reply = inbox.readByte();
+        inbox.readByte(); // reserved
+        byte type = inbox.readByte();
+        int rest =
+                type == IPV4
+                        ? 4
+                        : type == IPV6
+                                ? 16
+                                : type == DOMAIN
+                                        ? 1 + inbox.getUnsignedByte(inbox.readerIndex())
+                                        : -1;
+        if (rest < 0) {
+            return fail(ctx, "steinconnect.proxy.badReply");
+        }
+        if (inbox.readableBytes() < rest + 2) {
+            inbox.readerIndex(mark);
+            return false;
+        }
+        inbox.skipBytes(rest + 2);
+        if (reply != 0) {
+            return fail(ctx, reason(reply));
+        }
+        done(ctx);
+        return true;
     }
 
     private void auth(ChannelHandlerContext ctx) {
@@ -180,10 +207,10 @@ final class Socks5 extends ChannelDuplexHandler {
         step = 2;
     }
 
-    /** Tunel de pe: sai da fila, o jogo recebe o channelActive e o que ele escreveu sai agora. */
+    /** Tunnel up: leave the pipeline; what the game wrote goes out now. */
     private void done(ChannelHandlerContext ctx) throws Exception {
         step = 3;
-        dev.xavier.stein.loader.api.Log.of("steinconnect").info("tunel do proxy aberto ate " + host.getHostAddress() + ":" + port);
+        log.info("proxy tunnel open to " + host.getHostAddress() + ":" + port);
         ctx.pipeline().remove(this);
         for (Object[] w : held) {
             ctx.write(w[0], (ChannelPromise) w[1]);
@@ -192,18 +219,22 @@ final class Socks5 extends ChannelDuplexHandler {
         ctx.flush();
     }
 
-    /** Falha com o motivo traduzido ({@code key} e a chave do .lang): e o texto que o jogo mostra na desconexao. */
+    /**
+     * Fails with the translated reason ({@code key} is the lang key): the text the game shows on
+     * the disconnect screen.
+     */
     private boolean fail(ChannelHandlerContext ctx, String key) {
         step = 3;
         IOException cause = new IOException("Proxy: " + Lang.tr(key));
-        // A excecao vai antes de falhar o que estava guardado: quem chega primeiro e o motivo que o jogo mostra.
+        // The exception goes before failing what was held: what arrives first is the reason the
+        // game shows.
         ctx.fireExceptionCaught(cause);
         discard(cause);
         ctx.close();
         return false;
     }
 
-    /** A chave do .lang para o codigo de recusa do CONNECT (RFC 1928, secao 6). */
+    /** The lang key for the CONNECT refusal code (RFC 1928, section 6). */
     private static String reason(byte reply) {
         return switch (reply) {
             case 2 -> "steinconnect.proxy.notAllowed";
@@ -216,7 +247,8 @@ final class Socks5 extends ChannelDuplexHandler {
     }
 
     @Override
-    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise)
+            throws Exception {
         if (step < 3) {
             held.add(new Object[] {msg, promise});
             return;

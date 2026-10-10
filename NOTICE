@@ -3,9 +3,16 @@ Copyright (c) 2026 Breno Xavier (https://github.com/brenoxavier)
 
 Part of Stein (https://github.com/Stein-Project). Licensed under the Mozilla Public License 2.0 (see LICENSE).
 
-The Stein name and logo are trademarks of Breno Xavier and are not covered by the licence.
-See TRADEMARK.md for what is allowed.
+The Stein name and logo are trademarks of Breno Xavier and are not covered by the licence: see
+https://github.com/Stein-Project/.github/blob/main/TRADEMARK.md
 
 NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
 Minecraft is a trademark of Mojang AB. No Minecraft code or assets are distributed by this project:
 the game is patched at runtime, on the player's machine, from the player's own copy.
+
+-------------------------------------------------------------------------------
+Third-party software
+-------------------------------------------------------------------------------
+The mod is compiled against the Stein Loader mod API (MIT License), part of the Stein SDK
+(https://github.com/Stein-Project/stein-sdk). The SDK prepares Minecraft 1.8.9 for compiling on the
+build machine, from the player's own copy or from Mojang; nothing of it goes into the mod.

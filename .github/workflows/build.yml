@@ -1,0 +1,38 @@
+# Builds the mod the way any mod author does (the Stein SDK's Gradle plugin) and checks the formatting.
+#
+# No secrets: the SDK prepares Minecraft 1.8.9 for compiling from Mojang's own download (sha1-checked) on the runner,
+# and nothing of it is kept or published (no cache of ~/.stein-sdk on purpose). Pull requests from forks build too.
+#
+# The plugin version in build.gradle must be released on Stein-Project/stein-sdk (its "maven" branch and the
+# stein-sdk.jar release): until SDK 0.2.3 is out, this workflow cannot resolve the plugin and fails.
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # Gradle runs on any JDK 17+; the build compiles with the JDK 25 toolchain (this one, or downloaded).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      # Also checks that gradle-wrapper.jar is the official one.
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and check
+        run: ./gradlew build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: steinmod
+          path: build/libs/*.steinmod
+          retention-days: 14

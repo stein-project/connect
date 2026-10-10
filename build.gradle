@@ -1,0 +1,45 @@
+// Built like any Stein mod, with the Stein SDK's Gradle plugin:
+//
+//   ./gradlew build           build/libs/<Name>.steinmod, after checking the formatting
+//   ./gradlew installMod      build, then copy into .minecraft/mods
+//   ./gradlew spotlessApply   format the Java code (google-java-format, AOSP style) and add the licence header
+//
+// Before an SDK release, build against a local SDK (the sdk repository, built with "./gradlew build publishPlugin"):
+//
+//   ./gradlew build -Pstein.sdkDir=../../sdk
+plugins {
+    id 'dev.xavier.stein.mod' version '0.2.3'
+    id 'com.diffplug.spotless' version '8.10.4'
+}
+
+repositories {
+    // google-java-format, for spotless.
+    mavenCentral()
+}
+
+def localSdk = providers.gradleProperty('stein.sdkDir')
+if (localSdk.present) {
+    def jar = file("${localSdk.get()}/build/sdk/stein-sdk.jar")
+    if (!jar.isFile()) {
+        throw new GradleException("no $jar: run \"./gradlew build publishPlugin\" in ${localSdk.get()} first")
+    }
+    stein { sdkJar = jar }
+}
+
+spotless {
+    // LF everywhere, as committed (.editorconfig); Windows checkouts too.
+    lineEndings = com.diffplug.spotless.LineEnding.UNIX
+    java {
+        target 'src/**/*.java'
+        googleJavaFormat('1.36.1').aosp().reorderImports(true)
+        licenseHeader '''/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2026 Breno Xavier
+ */
+
+'''
+    }
+}
