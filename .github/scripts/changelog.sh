@@ -2,7 +2,7 @@
 # Release notes written by hand before a release, one file per language:
 #
 #   changelog/<version>.en_US.md    the public release text (English)
-#   changelog/<version>.pt_BR.md    the Discord text (Portuguese)
+#   changelog/<version>.pt_BR.md    optional: the Portuguese text, kept with the project
 #
 # Every file has the same shape:
 #
@@ -12,7 +12,8 @@
 #
 #   - One item per change a player notices.
 #
-#   changelog.sh check <dir> <version>        both languages present, with title and summary, no TODO
+#   changelog.sh check <dir> <version>        the English notes present; both (the Portuguese ones when
+#                                             written) with title and summary, no TODO
 #   changelog.sh title|summary|body <file>
 #
 # Ported from stein-master tools/changelog.sh. The same file is kept in the installer, client and sdk repositories and
@@ -32,13 +33,14 @@ case "$cmd" in
     dir="${1:?changelog dir}"; ver="${2:?version}"; fail=0
     for lang in en_US pt_BR; do
       f="$dir/$ver.$lang.md"
+      [ -f "$f" ] || [ "$lang" != pt_BR ] || continue
       if [ ! -f "$f" ]; then echo "::error::missing $f: write what changed before releasing" >&2; fail=1; continue; fi
       [ -n "$(title_of "$f")" ]   || { echo "::error::$f: no title (the first line is '# ...')" >&2; fail=1; }
       [ -n "$(summary_of "$f")" ] || { echo "::error::$f: no summary paragraph" >&2; fail=1; }
       ! grep -q 'TODO' "$f"       || { echo "::error::$f: still has TODO" >&2; fail=1; }
     done
     [ "$fail" = 0 ] || exit 1
-    echo "changelog ok: $dir/$ver.{en_US,pt_BR}.md"
+    echo "changelog ok:" "$dir/$ver".*.md
     ;;
   title)   title_of "${1:?file}" ;;
   summary) summary_of "${1:?file}" ;;

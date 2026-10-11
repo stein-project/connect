@@ -61,7 +61,7 @@ mod, also check that:
 Found a security problem (a password or token that leaks, for example)? Do not open a public issue: follow the
 [security policy](https://github.com/Stein-Project/.github/blob/main/SECURITY.md).
 
-Releases are made by the maintainer: a `v<version>` tag, with `changelog/<version>.en_US.md` and `.pt_BR.md`
+Releases are made by the maintainer: a `v<version>` tag, with `changelog/<version>.en_US.md` (and optionally `.pt_BR.md`)
 written first (see `.github/workflows/release.yml`).
 
 ## Licence
