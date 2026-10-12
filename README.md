@@ -30,7 +30,7 @@ with the **Stein Loader** profile.
 
 ## Building
 
-You need **JDK 17 or newer** to run Gradle (the JDK 25 the mod compiles with is downloaded if you do not have it).
+You need **JDK 25 or newer**.
 The [Stein SDK](https://github.com/Stein-Project/stein-sdk) Gradle plugin prepares Minecraft 1.8.9 for compiling the
 first time, from your own installation or from Mojang.
 
