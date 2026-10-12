@@ -9,7 +9,7 @@
 #   mod.sh test-index           a test version: its entry in the "test" block of the latest stable release's
 #                               steinmods.json (GH_TOKEN: same as release)
 #
-#   env: INDEX_ID (the short id of the index: "mouse"), INDEX_DESCRIPTION (the line players read, in Portuguese),
+#   env: INDEX_ID (the short id of the index: "hud"), INDEX_DESCRIPTION (the line players read, in Portuguese),
 #        RELEASE_REPO (owner/repo where the release goes: this repository for an open mod, a public one for a private
 #        mod), TAG (v<version> or v<version>-<label>), TESTE (the label, empty for a stable release),
 #        DIST_OWNER (default Stein-Project: where the Stein Client and the installer are, for the release notes)
