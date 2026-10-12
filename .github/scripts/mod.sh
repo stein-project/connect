@@ -3,18 +3,32 @@
 #
 #   mod.sh version              the "version" of src/main/resources/steinmod.json
 #   mod.sh files                dist/<Name>.steinmod, dist/SHA256SUMS.txt and notes.md (the release text, en_US)
-#   mod.sh entry                the mod's entry in the "mods" index of stein.json (JSON, printed)
-#   mod.sh release              the GitHub release of this repository (GH_TOKEN: the workflow's own token)
-#   mod.sh index                the entry upserted in <DIST_OWNER>/stein-loader/stein.json (GH_TOKEN: DIST_TOKEN)
+#   mod.sh entry                the mod's entry in its index (JSON, printed)
+#   mod.sh steinmods            dist/steinmods.json, the mod's index, published with every stable release
+#   mod.sh release              the GitHub release of RELEASE_REPO (GH_TOKEN: the workflow's own token, or RELEASE_TOKEN)
+#   mod.sh test-index           a test version: its entry in the "test" block of the latest stable release's
+#                               steinmods.json (GH_TOKEN: same as release)
 #
 #   env: INDEX_ID (the short id of the index: "mouse"), INDEX_DESCRIPTION (the line players read, in Portuguese),
 #        RELEASE_REPO (owner/repo where the release goes: this repository for an open mod, a public one for a private
 #        mod), TAG (v<version> or v<version>-<label>), TESTE (the label, empty for a stable release),
-#        DIST_OWNER (default Stein-Project)
+#        DIST_OWNER (default Stein-Project: where the Stein Client and the installer are, for the release notes)
 #
-# Ported from stein-master tools/publish.sh (indice_mod and sincronizar_dist_hub). The index entry is what the
-# installer and the Stein Client read to download and update the mod: id, modId (the "id" of steinmod.json, by which
-# they recognise the file already in the mods folder), name, file, version, url, sha256, loader, description.
+# Every mod publishes its own index, steinmods.json, as an asset of each stable release: the Stein Client and the
+# installer read it at https://github.com/<RELEASE_REPO>/releases/latest/download/steinmods.json, which always
+# points to the latest stable release. No central file is written, so no token other than the release's is needed.
+# The official mods are the ones whose index is listed in "sources" of Stein-Project/stein-loader/stein.json; any
+# other mod works the same way, as a third-party source the player adds in the Stein Client.
+#
+#   { "format": 1, "name": "HUD", "author": "X4vieer", "homepage": "https://github.com/...",
+#     "source": "<the latest/download link above>",
+#     "mods": [ <entry> ],
+#     "test": { "mods": [ <entry of a test version> ] } }      only while a test version is out
+#
+# An entry is what the Stein Client and the installer read to download and update the mod: id, modId (the "id" of
+# steinmod.json, by which they recognise the file already in the mods folder), name, file, version, url, sha256,
+# loader, description. An index may list several mods (one written by hand); the one written here lists this mod.
+#
 # The same file is kept in every mod repository (.github/scripts/mod.sh): change all of them together.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -85,28 +99,44 @@ release() {
     name="$name ($TESTE)"
   fi
   : "${RELEASE_REPO:?}"; dist_need_token "RELEASE_TOKEN (or the workflow token)"
+  # A stable release carries the index; a test one goes into the stable index instead (test-index).
+  [ -n "$TESTE" ] || steinmods
   dist_release "$RELEASE_REPO" "$TAG" "$name" "$notes" "$pre" dist/*
 }
 
-index() {
-  local m title
-  dist_need_token "DIST_TOKEN"
+steinmods() {
+  local m
   m="$(entry)"
-  title="$(field name) $(version)${TESTE:+ ($TESTE)}"
-  if [ -n "$TESTE" ]; then
-    # Test: only the "test.mods" block, which only the Stein Client's test channel reads.
-    dist_hub "$DIST_OWNER/stein-loader" "$title" \
-      '.test.mods = ((.test.mods // []) | if any(.[]; .id == $m.id) then map(if .id == $m.id then $m else . end)
-                                          else . + [$m] end)' --argjson m "$m"
-  else
-    # Replaced in place (or appended): the order of the index does not change, and running again writes nothing.
-    # The test of the same version leaves the test channel (whoever tested goes back to the stable one).
-    dist_hub "$DIST_OWNER/stein-loader" "$title" \
-      '.mods = ((.mods // []) | if any(.[]; .id == $m.id) then map(if .id == $m.id then $m else . end) else . + [$m] end)
-       | if .test.mods then
-           .test.mods |= map(select(.id != $m.id or (.version | startswith($m.version + "-") | not)))
-         else . end' --argjson m "$m"
+  jq -n --argjson m "$m" --arg name "$(field name)" --arg author "$(field author)" \
+        --arg homepage "https://github.com/$RELEASE_REPO" \
+        --arg source "https://github.com/$RELEASE_REPO/releases/latest/download/steinmods.json" \
+        '{format: 1, name: $name, author: $author, homepage: $homepage, source: $source, mods: [$m]}' \
+    > dist/steinmods.json
+}
+
+test_index() {
+  local m latest work
+  dist_need_token "RELEASE_TOKEN (or the workflow token)"
+  m="$(entry)"
+  # The latest stable release: the one releases/latest/download points to.
+  latest="$(gh release view --repo "$RELEASE_REPO" --json tagName -q .tagName 2>/dev/null || true)"
+  if [ -z "$latest" ]; then
+    echo "::warning::$RELEASE_REPO has no stable release yet: the test channel only sees a test version on top of one"
+    return 0
   fi
+  work="$(mktemp -d)"
+  gh release download "$latest" --repo "$RELEASE_REPO" -p steinmods.json -D "$work" \
+    || { echo "::error::$latest of $RELEASE_REPO has no steinmods.json"; return 1; }
+  jq --argjson m "$m" '.test.mods = ((.test.mods // []) | map(select(.id != $m.id)) + [$m])' \
+    "$work/steinmods.json" > "$work/new.json"
+  if cmp -s "$work/steinmods.json" "$work/new.json"; then
+    echo "steinmods.json of $latest already has $TAG"
+  else
+    mv "$work/new.json" "$work/steinmods.json"
+    gh release upload "$latest" "$work/steinmods.json" --repo "$RELEASE_REPO" --clobber
+    echo "steinmods.json of $latest: test version $TAG"
+  fi
+  rm -rf "$work"
 }
 
 case "${1:-}" in
@@ -114,6 +144,7 @@ case "${1:-}" in
   files) files ;;
   entry) entry ;;
   release) release ;;
-  index) index ;;
-  *) echo "usage: mod.sh version|files|entry|release|index" >&2; exit 2 ;;
+  steinmods) steinmods ;;
+  test-index) test_index ;;
+  *) echo "usage: mod.sh version|files|entry|steinmods|release|test-index" >&2; exit 2 ;;
 esac

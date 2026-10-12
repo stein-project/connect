@@ -1,25 +1,24 @@
-# The release of the mod: the .steinmod on a GitHub release, and the mod's entry in the mods index that the installer
-# and the Stein Client read (the "mods" of Stein-Project/stein-loader/stein.json).
+# The release of the mod: the .steinmod on a GitHub release, with the mod's own index (steinmods.json), which the
+# Stein Client and the installer read at https://github.com/<RELEASE_REPO>/releases/latest/download/steinmods.json.
+# An official mod is one whose index is listed in "sources" of Stein-Project/stein-loader/stein.json (changed by hand,
+# only when a mod joins or leaves); nothing here writes to that file.
 #
 #   git tag v0.1.8 && git push origin v0.1.8            stable: the tag must be v<"version" of steinmod.json>
-#   git tag v0.1.8-rc.1 && git push origin v0.1.8-rc.1  test version: a pre-release and the "test.mods" block of
-#                                                       stein.json, which only the Stein Client's test channel reads;
+#   git tag v0.1.8-rc.1 && git push origin v0.1.8-rc.1  test version: a pre-release, and its entry in the "test"
+#                                                         block of the latest stable release's steinmods.json, which
+#                                                         only the Stein Client's test channel reads
 #
 # Run by hand (Actions > release > Run workflow) it is a dry run (ensaio): it builds, checks the changelog, keeps the
-# .steinmod as a workflow artifact and prints the release notes and the index entry, publishing nothing.
+# .steinmod as a workflow artifact and prints the release notes and the index, publishing nothing.
 #
 # On a tag:
 #   1. the changelog is required before anything is built: changelog/<version>.en_US.md (.pt_BR.md optional; en_US goes on
 #      the release);
-#   2. release v<version> on RELEASE_REPO with <Name>.steinmod and SHA256SUMS.txt (the plain build: mods are not
-#      obfuscated);
-#   3. the mod's entry in the "mods" index (or "test.mods") of <DIST_OWNER>/stein-loader/stein.json: id, modId, name,
-#      file, version, url, sha256, loader, description. The rest of the file is kept as it is.
-# Every step is idempotent: running the same tag again publishes nothing twice.
-#
-# Settings of this repository:
-#   secrets    DIST_TOKEN          fine-grained PAT with Contents: read and write on Stein-Project/stein-loader
-#   variables  DIST_OWNER          optional, default Stein-Project
+#   2. release v<version> on RELEASE_REPO with <Name>.steinmod, SHA256SUMS.txt (the plain build: mods are not
+#      obfuscated) and, on a stable release, steinmods.json (id, modId, name, file, version, url, sha256, loader,
+#      description);
+#   3. a test version only: its entry in the "test" block of the latest stable release's steinmods.json.
+# Every step is idempotent: running the same tag again publishes nothing twice. Only the workflow's own token is used.
 #
 # Like build.yml, it needs the Stein SDK version of build.gradle released on Stein-Project/stein-sdk (0.2.3).
 name: release
@@ -114,8 +113,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           echo "release $TAG -> $RELEASE_REPO:"; ls dist
-          echo "index entry in $DIST_OWNER/stein-loader/stein.json:"
-          bash .github/scripts/mod.sh entry
+          echo "steinmods.json (the mod's index, on the release):"
+          bash .github/scripts/mod.sh steinmods
+          cat dist/steinmods.json
           echo "(dry run: nothing was published)"
 
       - name: Release (${{ env.RELEASE_REPO }})
@@ -127,10 +127,10 @@ jobs:
           TESTE: ${{ steps.version.outputs.teste }}
         run: bash .github/scripts/mod.sh release
 
-      - name: Mods index (${{ env.DIST_OWNER }}/stein-loader)
-        if: env.ENSAIO != 'true'
+      - name: Test index (steinmods.json of the latest stable release)
+        if: env.ENSAIO != 'true' && steps.version.outputs.teste != ''
         env:
-          GH_TOKEN: ${{ secrets.DIST_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           TESTE: ${{ steps.version.outputs.teste }}
-        run: bash .github/scripts/mod.sh index
+        run: bash .github/scripts/mod.sh test-index
