@@ -12,12 +12,11 @@
 #   env: INDEX_ID (the short id of the index: "hud"), INDEX_DESCRIPTION (the line players read, in Portuguese),
 #        RELEASE_REPO (owner/repo where the release goes: this repository for an open mod, a public one for a private
 #        mod), TAG (v<version> or v<version>-<label>), TESTE (the label, empty for a stable release),
-#        DIST_OWNER (default Stein-Project: where the Stein Client and the installer are, for the release notes)
 #
 # Every mod publishes its own index, steinmods.json, as an asset of each stable release: the Stein Client and the
 # installer read it at https://github.com/<RELEASE_REPO>/releases/latest/download/steinmods.json, which always
 # points to the latest stable release. No central file is written, so no token other than the release's is needed.
-# The official mods are the ones whose index is listed in "sources" of Stein-Project/stein-loader/stein.json; any
+# The official mods are the ones whose index is listed in "sources" of the stein.json of Stein-Project/installer; any
 # other mod works the same way, as a third-party source the player adds in the Stein Client.
 #
 #   { "format": 1, "name": "HUD", "author": "X4vieer", "homepage": "https://github.com/...",
@@ -34,7 +33,6 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/dist.sh"
 MANIFEST=src/main/resources/steinmod.json
-DIST_OWNER="${DIST_OWNER:-Stein-Project}"
 TESTE="${TESTE:-}"
 
 field() { jq -r --arg k "$1" '.[$k] // empty' "$MANIFEST"; }
@@ -64,8 +62,8 @@ files() {
     echo
     cl body
     echo
-    echo "**Install:** the [Stein Client](https://github.com/$DIST_OWNER/stein-client/releases/latest) and the"
-    echo "[Stein Loader installer](https://github.com/$DIST_OWNER/stein-loader/releases/latest) download and update"
+    echo "**Install:** the [Stein Client](https://stein-project.github.io/downloads/) and the"
+    echo "[Stein Loader installer](https://github.com/Stein-Project/installer/releases/latest) download and update"
     echo "this mod for you. By hand: put \`$file\` in \`.minecraft/mods\` and play with the **Stein Loader** profile"
     echo "(the mod asks for the Loader library $(field loader) or newer; any up-to-date install has it)."
     echo

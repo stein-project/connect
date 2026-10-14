@@ -7,7 +7,7 @@ pluginManagement {
             maven { url = settingsDir.toPath().resolve(localSdk.get()).resolve('build/maven-repo').toUri() }
         }
         // The Stein Gradle plugin (dev.xavier.stein.mod) lives here.
-        maven { url = uri('https://raw.githubusercontent.com/Stein-Project/stein-sdk/maven') }
+        maven { url = uri('https://raw.githubusercontent.com/Stein-Project/sdk/maven') }
         gradlePluginPortal()
     }
 }

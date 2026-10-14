@@ -3,7 +3,7 @@
 # No secrets: the SDK prepares Minecraft 1.8.9 for compiling from Mojang's own download (sha1-checked) on the runner,
 # and nothing of it is kept or published (no cache of ~/.stein-sdk on purpose). Pull requests from forks build too.
 #
-# The plugin version in build.gradle must be released on Stein-Project/stein-sdk (its "maven" branch and the
+# The plugin version in build.gradle must be released on Stein-Project/sdk (its "maven" branch and the
 # stein-sdk.jar release): until SDK 0.2.3 is out, this workflow cannot resolve the plugin and fails.
 name: build
 
