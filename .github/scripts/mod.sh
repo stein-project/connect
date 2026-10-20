@@ -8,16 +8,20 @@
 #   mod.sh release              the GitHub release of RELEASE_REPO (GH_TOKEN: the workflow's own token, or RELEASE_TOKEN)
 #   mod.sh test-index           a test version: its entry in the "test" block of the latest stable release's
 #                               steinmods.json (GH_TOKEN: same as release)
+#   mod.sh registry             the mod's index in the Stein registry, mods/<INDEX_ID>.json (REGISTRY_TOKEN;
+#                               ENSAIO=true only prints it)
 #
 #   env: INDEX_ID (the short id of the index: "hud"), INDEX_DESCRIPTION (the line players read, in Portuguese),
 #        RELEASE_REPO (owner/repo where the release goes: this repository for an open mod, a public one for a private
 #        mod), TAG (v<version> or v<version>-<label>), TESTE (the label, empty for a stable release),
 #
-# Every mod publishes its own index, steinmods.json, as an asset of each stable release: the Stein Client and the
-# installer read it at https://github.com/<RELEASE_REPO>/releases/latest/download/steinmods.json, which always
-# points to the latest stable release. No central file is written, so no token other than the release's is needed.
-# The official mods are the ones whose index is listed in "sources" of the stein.json of Stein-Project/installer; any
-# other mod works the same way, as a third-party source the player adds in the Stein Client.
+# Every mod publishes its own index, steinmods.json, as an asset of each stable release, at
+# https://github.com/<RELEASE_REPO>/releases/latest/download/steinmods.json, which always points to the latest stable
+# release. An official mod also writes the same index to the Stein registry (Stein-Project/registry,
+# mods/<INDEX_ID>.json, with "source" pointing there): that is the copy the Stein Client and the installer read now,
+# signed by the registry, and listed in "sources" of the registry's stein.json (changed by hand, only when a mod joins
+# or leaves). The release's own copy stays as a bridge for programs older than the registry. Any other mod works as
+# before, as a third-party source the player adds in the Stein Client.
 #
 #   { "format": 1, "name": "HUD", "author": "X4vieer", "homepage": "https://github.com/...",
 #     "source": "<the latest/download link above>",
@@ -137,6 +141,30 @@ test_index() {
   rm -rf "$work"
 }
 
+# The mod's index in the Stein registry (mods/<INDEX_ID>.json): a stable release writes it whole, with "source" in the
+# registry; a test version adds its entry to the "test" block of the registry's copy, as test-index does for the
+# release's steinmods.json.
+registry_index() {
+  local m work
+  . "$here/registry.sh"
+  : "${INDEX_ID:?}"
+  work="$(mktemp -d)"
+  if [ -z "$TESTE" ]; then
+    steinmods
+    jq --arg s "${REGISTRY_URL}mods/$INDEX_ID.json" '.source = $s' dist/steinmods.json > "$work/mod.json"
+  else
+    m="$(entry)"
+    if ! registry_get "mods/$INDEX_ID.json" "$work/base.json"; then
+      echo "::warning::the registry has no mods/$INDEX_ID.json yet: a test version only shows on top of a stable one"
+      rm -rf "$work"
+      return 0
+    fi
+    jq --argjson m "$m" '.test.mods = ((.test.mods // []) | map(select(.id != $m.id)) + [$m])'       "$work/base.json" > "$work/mod.json"
+  fi
+  registry_put "mods/$INDEX_ID.json" "$work/mod.json" "$(field name) $(version)${TESTE:+ ($TESTE)}: index"
+  rm -rf "$work"
+}
+
 case "${1:-}" in
   version) version ;;
   files) files ;;
@@ -144,5 +172,6 @@ case "${1:-}" in
   release) release ;;
   steinmods) steinmods ;;
   test-index) test_index ;;
-  *) echo "usage: mod.sh version|files|entry|steinmods|release|test-index" >&2; exit 2 ;;
+  registry) registry_index ;;
+  *) echo "usage: mod.sh version|files|entry|steinmods|release|test-index|registry" >&2; exit 2 ;;
 esac

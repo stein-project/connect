@@ -1,7 +1,7 @@
-# The release of the mod: the .steinmod on a GitHub release, with the mod's own index (steinmods.json), which the
-# Stein Client and the installer read at https://github.com/<RELEASE_REPO>/releases/latest/download/steinmods.json.
-# An official mod is one whose index is listed in "sources" of the stein.json of Stein-Project/installer (changed by hand,
-# only when a mod joins or leaves); nothing here writes to that file.
+# The release of the mod: the .steinmod on a GitHub release, with the mod's own index (steinmods.json), and the same
+# index in the Stein registry (Stein-Project/registry, mods/<INDEX_ID>.json), which the Stein Client and the installer
+# read, signed. An official mod is one whose index is listed in "sources" of the registry's stein.json (changed by hand,
+# only when a mod joins or leaves). The release's steinmods.json stays as a bridge for programs older than the registry.
 #
 #   git tag v0.1.8 && git push origin v0.1.8            stable: the tag must be v<"version" of steinmod.json>
 #   git tag v0.1.8-rc.1 && git push origin v0.1.8-rc.1  test version: a pre-release, and its entry in the "test"
@@ -17,8 +17,10 @@
 #   2. release v<version> on RELEASE_REPO with <Name>.steinmod, SHA256SUMS.txt (the plain build: mods are not
 #      obfuscated) and, on a stable release, steinmods.json (id, modId, name, file, version, url, sha256, loader,
 #      description);
-#   3. a test version only: its entry in the "test" block of the latest stable release's steinmods.json.
-# Every step is idempotent: running the same tag again publishes nothing twice. Only the workflow's own token is used.
+#   3. a test version only: its entry in the "test" block of the latest stable release's steinmods.json;
+#   4. the index in the registry, mods/<INDEX_ID>.json (a test version: its entry in the "test" block there).
+# Every step is idempotent: running the same tag again publishes nothing twice. The release uses the workflow's own
+# token; the registry needs the REGISTRY_TOKEN secret (Contents: write on the registry).
 #
 # Like build.yml, it needs the Stein SDK version of build.gradle released on Stein-Project/sdk (0.2.3).
 name: release
@@ -115,6 +117,7 @@ jobs:
           echo "steinmods.json (the mod's index, on the release):"
           bash .github/scripts/mod.sh steinmods
           cat dist/steinmods.json
+          bash .github/scripts/mod.sh registry
           echo "(dry run: nothing was published)"
 
       - name: Release (${{ env.RELEASE_REPO }})
@@ -133,3 +136,12 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
           TESTE: ${{ steps.version.outputs.teste }}
         run: bash .github/scripts/mod.sh test-index
+
+      - name: Registry (mods/${{ env.INDEX_ID }}.json)
+        if: env.ENSAIO != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TESTE: ${{ steps.version.outputs.teste }}
+        run: bash .github/scripts/mod.sh registry
