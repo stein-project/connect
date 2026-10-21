@@ -145,24 +145,26 @@ test_index() {
 # registry; a test version adds its entry to the "test" block of the registry's copy, as test-index does for the
 # release's steinmods.json.
 registry_index() {
-  local m work
   . "$here/registry.sh"
   : "${INDEX_ID:?}"
-  work="$(mktemp -d)"
   if [ -z "$TESTE" ]; then
     steinmods
-    jq --arg s "${REGISTRY_URL}mods/$INDEX_ID.json" '.source = $s' dist/steinmods.json > "$work/mod.json"
   else
-    m="$(entry)"
-    if ! registry_get "mods/$INDEX_ID.json" "$work/base.json"; then
-      echo "::warning::the registry has no mods/$INDEX_ID.json yet: a test version only shows on top of a stable one"
-      rm -rf "$work"
-      return 0
-    fi
-    jq --argjson m "$m" '.test.mods = ((.test.mods // []) | map(select(.id != $m.id)) + [$m])'       "$work/base.json" > "$work/mod.json"
+    _REGISTRY_ENTRY="$(entry)"
   fi
-  registry_put "mods/$INDEX_ID.json" "$work/mod.json" "$(field name) $(version)${TESTE:+ ($TESTE)}: index"
-  rm -rf "$work"
+  registry_update "mods/$INDEX_ID.json" "$(field name) $(version)${TESTE:+ ($TESTE)}: index" _registry_mod
+}
+
+# registry_update's build function: <current mods/<INDEX_ID>.json or ""> <out file>.
+_registry_mod() {
+  if [ -z "$TESTE" ]; then
+    jq --arg s "${REGISTRY_URL}mods/$INDEX_ID.json" '.source = $s' dist/steinmods.json > "$2"
+  elif [ -z "$1" ]; then
+    echo "::warning::the registry has no mods/$INDEX_ID.json yet: a test version only shows on top of a stable one"
+  else
+    jq --argjson m "$_REGISTRY_ENTRY" '.test.mods = ((.test.mods // []) | map(select(.id != $m.id)) + [$m])' \
+      "$1" > "$2"
+  fi
 }
 
 case "${1:-}" in
