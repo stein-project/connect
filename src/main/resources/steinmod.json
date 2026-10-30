@@ -5,5 +5,6 @@
   "author": "X4vieer",
   "description": "Everything about joining a server: accounts, reconnect after a drop, and a SOCKS5 proxy. Replaces Alt Manager and Reconnect.",
   "entry": "dev.xavier.stein.connect.SteinConnect",
-  "loader": "0.1.16"
+  "loader": "0.1.16",
+  "source": "https://stein-project.github.io/registry/mods/connect.json"
 }
