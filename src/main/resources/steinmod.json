@@ -1,7 +1,7 @@
 {
   "id": "steinconnect",
   "name": "Connect",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "author": "X4vieer",
   "description": "Everything about joining a server: accounts, reconnect after a drop, and a SOCKS5 proxy. Replaces Alt Manager and Reconnect.",
   "entry": "dev.xavier.stein.connect.SteinConnect",
